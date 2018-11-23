@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Management.Automation;
+using System.Security.Principal;
 
 namespace SimpleACL
 {
@@ -9,7 +10,7 @@ namespace SimpleACL
     public sealed class TestEffectiveAccessCommand : Cmdlet
     {
         #region parameters
-        [Parameter(Mandatory = true, Position = 0)]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline =true,ValueFromPipelineByPropertyName =true)]
         [ValidateNotNullOrEmpty()]
         public string[] Path { get; set; }
 
@@ -40,7 +41,7 @@ namespace SimpleACL
                         {
                             WriteError(new ErrorRecord(e, "UnauthorizedAccess", ErrorCategory.PermissionDenied, pathItem));
                         }
-                        catch (System.Security.Principal.IdentityNotMappedException e)
+                        catch (IdentityNotMappedException e)
                         {
                             WriteError(new ErrorRecord(e, "InvalidIdentity", ErrorCategory.ObjectNotFound, user));
                         }

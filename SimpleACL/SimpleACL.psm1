@@ -1,81 +1,5 @@
-#region Access functions
-function Disable-AccessInheritance
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [switch]$RemoveInheritedRules
-    )
-    process
-    {
-        foreach ($item in $Path)
-        {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject= Get-Acl -Path $item
-            }
-            $AclObject.SetAccessRuleProtection($true,!$RemoveInheritedRules)
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $ItemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }
-        }
-    }
-}
-function Enable-AccessInheritance
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [switch]$RemoveExplicitRules
-    )
-    process
-    {
-        foreach ($item in $Path)
-        {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject= Get-Acl -Path $item
-            }
-            
-            $AclObject.SetAccessRuleProtection($false,$null)
-            if ($RemoveExplicitRules)
-            {
-                [void]($AclObject.Access.Where({$_.IsInherited -eq $false}).foreach({$AclObject.RemoveAccessRule($_)}))
-            }
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $ItemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }
-        }
-    }
-}
+#region Owner functions
+# No point in creating a function when the default view for get-acl already shows the owner.
 New-Alias -Name "Get-Owner" -Value "Get-ACL"
 function Set-Owner
 {
@@ -95,26 +19,60 @@ function Set-Owner
     {
         foreach ($item in $Path)
         {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject=Get-Acl -Path $item
-            }
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
+
             $AclObject.SetOwner($NewOwnerReference)
 
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject
+        }
+    }
+}
+#endregion
+
+#region Access functions
+function Disable-AccessInheritance
+{
+    param
+    ( 
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+        [String[]]$Path,
+
+        [switch]$RemoveInheritedRules
+    )
+    process
+    {
+        foreach ($item in $Path)
+        {
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
+
+            $AclObject.SetAccessRuleProtection($true,!$RemoveInheritedRules)
+
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject
+        }
+    }
+}
+function Enable-AccessInheritance
+{
+    param
+    ( 
+        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+        [String[]]$Path,
+
+        [switch]$RemoveExplicitRules
+    )
+    process
+    {
+        foreach ($item in $Path)
+        {
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
+
+            $AclObject.SetAccessRuleProtection($false,$null)
+            if ($RemoveExplicitRules)
             {
-                $ItemObject.SetAccessControl($AclObject)
+                [void]($AclObject.Access.Where({$_.IsInherited -eq $false}).foreach({$AclObject.RemoveAccessRule($_)}))
             }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }
+
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject
         }
     }
 }
@@ -201,7 +159,7 @@ function Add-AccessRuleForItem
             "OnlySubFolders",
             "OnlyFiles"
         )]
-        [string]$AppliesToSettings,
+        [string]$AppliesTo,
 
         [parameter(ParameterSetName="WithUser")]
         [switch]$OnlyApplyThesePermissionsToObjectsAndContainersWithinThisContainer
@@ -217,9 +175,9 @@ function Add-AccessRuleForItem
             }
             switch ($PSBoundParameters.Keys)
             {
-                'AppliesToSettings'
+                'AppliesTo'
                 {
-                    $NewRuleSplat.Add('AppliesTo',$AppliesToSettings)
+                    $NewRuleSplat.Add('AppliesTo',$AppliesTo)
                 }
                 'OnlyApplyThesePermissionsToObjectsAndContainersWithinThisContainer'
                 {
@@ -235,30 +193,14 @@ function Add-AccessRuleForItem
     {
         foreach ($item in $Path)
         {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject= Get-Acl -Path $item
-            }
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
 
             foreach ($rule in $AccessRule)
             {
                 $AclObject.AddAccessRule($rule)
             }
 
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $ItemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject
         }
     }
 }
@@ -286,15 +228,7 @@ function Remove-AccessRuleForItem
     {
         foreach ($item in $Path)
         {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject= Get-Acl -Path $item
-            }
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
 
             if ($IdentityReference)
             {
@@ -311,15 +245,7 @@ function Remove-AccessRuleForItem
                 }
             }
 
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $ItemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject   
         }
     }
 }
@@ -353,7 +279,7 @@ function Set-AccessRuleForItem
             "OnlySubFolders",
             "OnlyFiles"
         )]
-        [string]$NewAppliesToSettings,
+        [string]$NewAppliesTo,
 
         [parameter(ParameterSetName="WithUser")]
         [System.Security.AccessControl.InheritanceFlags[]]$NewInheritanceFlags,
@@ -365,15 +291,7 @@ function Set-AccessRuleForItem
     {
         foreach ($item in $Path)
         {
-            $ItemObject=Get-Item -Path $item
-            try
-            {
-                $AclObject= $ItemObject.GetAccessControl()
-            }
-            catch
-            {
-                $AclObject= Get-Acl -Path $item
-            }     
+            $ItemObject,$AclObject=Get-SimpleACL -Path $item
             
             if ($Identity)
             {
@@ -400,9 +318,9 @@ function Set-AccessRuleForItem
                             {
                                 $NewRuleSplat["Type"]=$PSBoundParameters["NewType"]
                             }
-                            'NewAppliesToSettings'
+                            'NewAppliesTo'
                             {
-                                $ConvertedFlags=Convert-FriendlyRulesToFlags -AppliesTo $PSBoundParameters['NewAppliesToSettings']
+                                $ConvertedFlags=Convert-FriendlyRulesToFlags -AppliesTo $PSBoundParameters['NewAppliesTo']
                                 $NewRuleSplat["InheritanceFlags"]=$ConvertedFlags.InheritanceFlags
                                 $NewRuleSplat["PropagationFlags"]=$ConvertedFlags.PropagationFlags
                             }
@@ -428,16 +346,7 @@ function Set-AccessRuleForItem
             {
                 $AclObject.ResetAccessRule($NewAccessRule)
             }
-        
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $ItemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
+            Set-SimpleACL -ItemObject $ItemObject -AclObject $AclObject        
         }
     }
 }
@@ -511,285 +420,286 @@ function Get-AccessRuleForItem
 #endregion
 
 #region Audit functions (unfinished)
-function Disable-AuditInheritance
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [switch]$RemoveInheritedRules
-    )
-    process
-    {
-        if ($RemoveInheritedRules)
-        {
-            $PreserveInheritedRules=$false
-        }
-        else
-        {
-            $PreserveInheritedRules=$true
-        }
-        foreach ($item in $Path)
-        {
-            $FileSystemObject=Get-Item -Path $item
-            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
-            $AclObject.SetAuditRuleProtection($true,$PreserveInheritedRules)
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $FileSystemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
-        }
-    }
-}
-function Enable-AuditInheritance
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [switch]$RemoveExplicitRules
-    )
-    process
-    {
-        foreach ($item in $Path)
-        {
-            $FileSystemObject=Get-Item -Path $item
-            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
-            $AclObject.SetAuditRuleProtection($false,$null)
-            
-            if ($RemoveExplicitRules)
-            {
-                [void]($AclObject.GetAuditRules($true,$false,[System.Security.Principal.NTAccount]).foreach({$AclObject.RemoveAuditRule($_)}))
-            }
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $FileSystemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }
-        }
-    }
-}
-function New-AuditRule
-{
-    [OutputType([System.Security.AccessControl.FileSystemAuditRule[]])]
-    Param
-    (
-        # Param1 help description
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [string[]]$Identity,
-
-        # Param2 help description
-        [Parameter(Mandatory=$true)]
-        [System.Security.AccessControl.FileSystemRights[]]$FileSystemRights,
-
-        # Param2 help description
-        [System.Security.AccessControl.InheritanceFlags[]]$inheritanceFlags=@("ContainerInherit","ObjectInherit"),
-
-        # Param2 help description
-        [System.Security.AccessControl.PropagationFlags[]]$propagationFlags="None",
-
-        # Param2 help description
-        [System.Security.AccessControl.AuditFlags[]]$type=@("Success","Failure")
-    )
-    Process
-    {
-        foreach ($User in $Identity)
-        {
-            [System.Security.AccessControl.FileSystemAuditRule]::new($User,$FileSystemRights,$inheritanceFlags,$propagationFlags,$type)
-        }
-    }
-}
-function Add-AuditRule
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithAuditRule",Position=1)]
-        [System.Security.AccessControl.AuditRule[]]$AuditRule,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
-        [String[]]$Identity,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=2)]
-        [System.Security.AccessControl.FileSystemRights[]]$Permissions,
-
-        [System.Security.AccessControl.AuditFlags[]]$Type=@("Success","Failure")
-    )
-    process
-    {
-        if ($Identity)
-        {
-            $AuditRule= New-AuditRule -Identity $Identity -FileSystemRights $Permissions -type $Type
-        }
-        foreach ($item in $Path)
-        {
-            $FileSystemObject=Get-Item -Path $item
-            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
-            foreach ($rule in $AuditRule)
-            {
-                $AclObject.AddAuditRule($rule)
-            }
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $FileSystemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
-        }
-    }
-}
-function Remove-AuditRule
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithAuditRule",Position=1)]
-        [System.Security.AccessControl.AuditRule[]]$AuditRule,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
-        [String[]]$Identity
-    )
-    process
-    {
-        foreach ($item in $Path)
-        {
-            $FileSystemObject=Get-Item -Path $item
-            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
-            if ($Identity)
-            {
-                foreach ($user in $Identity)
-                {
-                    $AclObject.PurgeAuditRules([System.Security.Principal.NTAccount]::new($user))
-                }
-            }
-            else
-            {
-                foreach ($rule in $AccessRule)
-                {
-                    $AclObject.RemoveAuditRule($rule)
-                }
-            }
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $FileSystemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
-        }
-    }
-}
-function Set-AuditRule
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithAccessRule",Position=1)]
-        [System.Security.AccessControl.AuditRule]$NewAuditRule,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
-        [String[]]$Identity,
-
-        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=2)]
-        [System.Security.AccessControl.FileSystemRights[]]$NewFileSystemRights,
-
-        [Parameter(Mandatory=$false,ParameterSetName="WithUser",Position=3)]
-        [System.Security.AccessControl.AuditFlags[]]$NewType=@("Success","Failure")
-    )
-    process
-    {
-        foreach ($item in $Path)
-        {
-            $FileSystemObject=Get-Item -Path $item
-            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
-            
-            
-            if ($Identity)
-            {
-                foreach ($User in $Identity)
-                {
-                    $tempRule=New-AuditRule -Identity $User -FileSystemRights $NewFileSystemRights -type $NewType
-                    $AclObject.RemoveAuditRuleAll($tempRule)
-                    $AclObject.AddAuditRule($tempRule)
-                }
-            }
-            else
-            {
-                    $AclObject.RemoveAuditRuleAll($NewAuditRule)
-                    $AclObject.AddAuditRule($NewAuditRule)
-            }
-
-            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
-            try
-            {
-                $FileSystemObject.SetAccessControl($AclObject)
-            }
-            catch
-            {
-                Set-Acl -Path $item -AclObject $AclObject
-            }           
-        }
-    }
-}
-function Get-AuditRule
-{
-    param
-    ( 
-        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
-        [String[]]$Path,
-
-        [Parameter()]
-        [System.Security.AccessControl.AuditFlags[]]$Type=@("Success","Failure"),
-
-        [Parameter()]
-        [switch]$ExcludeInheritedRules,
-
-        [Parameter()]
-        [switch]$ExcludeExplicitRules
-    )
-    process
-    {
-        $includeExplicit=$true
-        $includeInherited=$true
-        if($ExcludeInheritedRules)
-        {
-            $includeInherited=$false
-        }
-        if($ExcludeExplicitRules)
-        {
-            $includeExplicit=$false
-        }
-
-        (Get-Item -Path $Path).GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit).GetAuditRules($includeExplicit,$includeInherited,[System.Security.Principal.NTAccount]).Where({$_.Auditflags -eq $Type})
-    }
-}
+#function Disable-AuditInheritance
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [switch]$RemoveInheritedRules
+#    )
+#    process
+#    {
+#        if ($RemoveInheritedRules)
+#        {
+#            $PreserveInheritedRules=$false
+#        }
+#        else
+#        {
+#            $PreserveInheritedRules=$true
+#        }
+#        foreach ($item in $Path)
+#        {
+#            $FileSystemObject=Get-Item -Path $item
+#            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
+#            $AclObject.SetAuditRuleProtection($true,$PreserveInheritedRules)
+#
+#            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+#            try
+#            {
+#                $FileSystemObject.SetAccessControl($AclObject)
+#            }
+#            catch
+#            {
+#                Set-Acl -Path $item -AclObject $AclObject
+#            }           
+#        }
+#    }
+#}
+#function Enable-AuditInheritance
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [switch]$RemoveExplicitRules
+#    )
+#    process
+#    {
+#        foreach ($item in $Path)
+#        {
+#            $FileSystemObject=Get-Item -Path $item
+#            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
+#            $AclObject.SetAuditRuleProtection($false,$null)
+#            
+#            if ($RemoveExplicitRules)
+#            {
+#                [void]($AclObject.GetAuditRules($true,$false,[System.Security.Principal.NTAccount]).foreach({$AclObject.RemoveAuditRule($_)}))
+#            }
+#
+#            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+#            try
+#            {
+#                $FileSystemObject.SetAccessControl($AclObject)
+#            }
+#            catch
+#            {
+#                Set-Acl -Path $item -AclObject $AclObject
+#            }
+#        }
+#    }
+#}
+#function New-AuditRule
+#{
+#    [OutputType([System.Security.AccessControl.FileSystemAuditRule[]])]
+#    Param
+#    (
+#        # Param1 help description
+#        [Parameter(Mandatory=$true)]
+#        [ValidateNotNullOrEmpty()]
+#        [string[]]$Identity,
+#
+#        # Param2 help description
+#        [Parameter(Mandatory=$true)]
+#        [System.Security.AccessControl.FileSystemRights[]]$FileSystemRights,
+#
+#        # Param2 help description
+#        [System.Security.AccessControl.InheritanceFlags[]]$inheritanceFlags=@("ContainerInherit","ObjectInherit"),
+#
+#        # Param2 help description
+#        [System.Security.AccessControl.PropagationFlags[]]$propagationFlags="None",
+#
+#        # Param2 help description
+#        [System.Security.AccessControl.AuditFlags[]]$type=@("Success","Failure")
+#    )
+#    Process
+#    {
+#        foreach ($User in $Identity)
+#        {
+#            [System.Security.AccessControl.FileSystemAuditRule]::new($User,$FileSystemRights,$inheritanceFlags,$propagationFlags,$type)
+#        }
+#    }
+#}
+#function Add-AuditRuleForItem
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithAuditRule",Position=1)]
+#        [System.Security.AccessControl.AuditRule[]]$AuditRule,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
+#        [String[]]$Identity,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=2)]
+#        [System.Security.AccessControl.FileSystemRights[]]$Permissions,
+#
+#        [System.Security.AccessControl.AuditFlags[]]$Type=@("Success","Failure")
+#    )
+#    process
+#    {
+#        if ($Identity)
+#        {
+#            $AuditRule= New-AuditRule -Identity $Identity -FileSystemRights $Permissions -type $Type
+#        }
+#        foreach ($item in $Path)
+#        {
+#            $FileSystemObject=Get-Item -Path $item
+#            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
+#            foreach ($rule in $AuditRule)
+#            {
+#                $AclObject.AddAuditRule($rule)
+#            }
+#
+#            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+#            try
+#            {
+#                $FileSystemObject.SetAccessControl($AclObject)
+#            }
+#            catch
+#            {
+#                Set-Acl -Path $item -AclObject $AclObject
+#            }           
+#        }
+#    }
+#}
+#function Remove-AuditRuleForItem
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithAuditRule",Position=1)]
+#        [System.Security.AccessControl.AuditRule[]]$AuditRule,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
+#        [String[]]$Identity
+#    )
+#    process
+#    {
+#        foreach ($item in $Path)
+#        {
+#            $FileSystemObject=Get-Item -Path $item
+#            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
+#            if ($Identity)
+#            {
+#                foreach ($user in $Identity)
+#                {
+#                    $AclObject.PurgeAuditRules([System.Security.Principal.NTAccount]::new($user))
+#                }
+#            }
+#            else
+#            {
+#                foreach ($rule in $AccessRule)
+#                {
+#                    $AclObject.RemoveAuditRule($rule)
+#                }
+#            }
+#
+#            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+#            try
+#            {
+#                $FileSystemObject.SetAccessControl($AclObject)
+#            }
+#            catch
+#            {
+#                Set-Acl -Path $item -AclObject $AclObject
+#            }           
+#        }
+#    }
+#}
+#New-Alias -Name "Remove-AccessRuleFromItem" -Value "Remove-AccessRuleForItem"
+#function Set-AuditRuleForItem
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithAccessRule",Position=1)]
+#        [System.Security.AccessControl.AuditRule]$NewAuditRule,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=1)]
+#        [String[]]$Identity,
+#
+#        [Parameter(Mandatory=$true,ParameterSetName="WithUser",Position=2)]
+#        [System.Security.AccessControl.FileSystemRights[]]$NewFileSystemRights,
+#
+#        [Parameter(Mandatory=$false,ParameterSetName="WithUser",Position=3)]
+#        [System.Security.AccessControl.AuditFlags[]]$NewType=@("Success","Failure")
+#    )
+#    process
+#    {
+#        foreach ($item in $Path)
+#        {
+#            $FileSystemObject=Get-Item -Path $item
+#            $AclObject= $FileSystemObject.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit)
+#            
+#            
+#            if ($Identity)
+#            {
+#                foreach ($User in $Identity)
+#                {
+#                    $tempRule=New-AuditRule -Identity $User -FileSystemRights $NewFileSystemRights -type $NewType
+#                    $AclObject.RemoveAuditRuleAll($tempRule)
+#                    $AclObject.AddAuditRule($tempRule)
+#                }
+#            }
+#            else
+#            {
+#                    $AclObject.RemoveAuditRuleAll($NewAuditRule)
+#                    $AclObject.AddAuditRule($NewAuditRule)
+#            }
+#
+#            #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+#            try
+#            {
+#                $FileSystemObject.SetAccessControl($AclObject)
+#            }
+#            catch
+#            {
+#                Set-Acl -Path $item -AclObject $AclObject
+#            }           
+#        }
+#    }
+#}
+#function Get-AuditRuleForItem
+#{
+#    param
+#    ( 
+#        [Parameter(Mandatory=$true,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true,Position=0)]
+#        [String[]]$Path,
+#
+#        [Parameter()]
+#        [System.Security.AccessControl.AuditFlags[]]$Type=@("Success","Failure"),
+#
+#        [Parameter()]
+#        [switch]$ExcludeInheritedRules,
+#
+#        [Parameter()]
+#        [switch]$ExcludeExplicitRules
+#    )
+#    process
+#    {
+#        $includeExplicit=$true
+#        $includeInherited=$true
+#        if($ExcludeInheritedRules)
+#        {
+#            $includeInherited=$false
+#        }
+#        if($ExcludeExplicitRules)
+#        {
+#            $includeExplicit=$false
+#        }
+#
+#        (Get-Item -Path $Path).GetAccessControl([System.Security.AccessControl.AccessControlSections]::Audit).GetAuditRules($includeExplicit,$includeInherited,[System.Security.Principal.NTAccount]).Where({$_.Auditflags -eq $Type})
+#    }
+#}
 #endregion
 
 #region internal (and ugly) functions
@@ -893,6 +803,32 @@ function Convert-StringToIdentityReference
                 [System.Security.Principal.NTAccount]::new($User)
             }
         }
+    }
+}
+function Get-SimpleACL ($Path)
+{
+    $ItemObject=Get-Item -Path $Path
+    try
+    {
+        $AclObject= $ItemObject.GetAccessControl()
+    }
+    catch
+    {
+        $AclObject= Get-Acl -Path $Path
+    }
+    $ItemObject
+    $AclObject
+}
+function Set-SimpleACL ($ItemObject,$AclObject)
+{
+    #SetAccessControl sometimes fails where Set-ACL doesn't, and vice versa
+    try
+    {
+        $ItemObject.SetAccessControl($AclObject)
+    }
+    catch
+    {
+        Set-Acl -Path $item -AclObject $AclObject
     }
 }
 #endregion
